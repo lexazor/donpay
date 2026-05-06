@@ -1,62 +1,62 @@
-# DonPay Deployment Guide
+# DonPay VPS Guide (PM2, Tanpa Docker)
 
-Deploy DonPay (Next.js + NestJS + MySQL + Prisma) ke VPS/aaPanel dengan cepat, aman, dan mudah di-maintain.
+Panduan ini khusus untuk pemula dan sudah full **tanpa Docker**.
+Target deploy: **Node.js + PM2 + MySQL lokal** di VPS (Ubuntu) dan bisa dipakai di aaPanel.
 
-## Ringkasan
+## Struktur dan Lokasi Penting
 - Repo: `https://github.com/lexazor/donpay.git`
-- Path standar server: `/www/wwwroot/donpay`
-- Lokasi file penting:
-  - Backend env: `/www/wwwroot/donpay/backend/.env`
-  - Frontend env: `/www/wwwroot/donpay/frontend/.env`
-  - Docker Compose: `/www/wwwroot/donpay/docker-compose.yml`
-- Service default:
-  - Frontend: `3000`
-  - Backend API: `3001`
-  - MySQL: `3306`
+- Folder app: `/www/wwwroot/donpay`
+- Backend env: `/www/wwwroot/donpay/backend/.env`
+- Frontend env: `/www/wwwroot/donpay/frontend/.env`
+- PM2 config: `/www/wwwroot/donpay/ecosystem.config.cjs`
 
-## Opsi 1 — Instalasi Otomatis (Direkomendasikan)
+## Sebelum Mulai
 
-### 1) Jalankan dari VPS
+- OS disarankan: Ubuntu 22.04/24.04
+- Akses: user `root` atau user dengan `sudo`
+- Domain (opsional tapi disarankan):
+  - frontend: misal `app.domainkamu.com`
+  - backend: misal `api.domainkamu.com`
+- Port internal aplikasi:
+  - frontend: `3000`
+  - backend: `3001`
+
+## Opsi A — Instalasi Otomatis (Paling Mudah)
+
+Jalankan di VPS:
+
 ```bash
 cd /root
 wget -O install.sh https://raw.githubusercontent.com/lexazor/donpay/main/install.sh
 chmod +x install.sh
-sudo APP_DIR=/www/wwwroot/donpay REPO_URL=https://github.com/lexazor/donpay.git BRANCH=main ./install.sh
+sudo APP_DIR=/www/wwwroot/donpay REPO_URL=https://github.com/lexazor/donpay.git BRANCH=main DB_NAME=donpay DB_USER=donpay DB_PASSWORD='GantiPasswordKuat!' ./install.sh
 ```
 
-### 2) Yang dilakukan `install.sh`
-- Install Docker + Docker Compose (jika belum ada)
-- Clone/pull repository `donpay`
-- Generate file `.env` dari `.env.example` (jika belum ada)
-- Build + run semua container via `docker compose`
-- Jalankan `prisma:migrate` dan `prisma:generate`
+`install.sh` akan otomatis:
+- install Node.js 20, PM2, MySQL server
+- clone/update repo
+- membuat `.env` dari `.env.example`
+- membuat database/user MySQL
+- build backend + frontend
+- migrate Prisma
+- start app dengan PM2
 
-## Opsi 2 — Instalasi Manual (Step by Step)
+Setelah selesai, lanjut ke bagian **Reverse Proxy di aaPanel** agar domain bisa diakses publik.
 
-### 1) Login VPS
-```bash
-ssh root@IP_SERVER
-```
+## Opsi B — Instalasi Manual Step-by-Step
 
-### 2) Install dependency dasar
+### 1) Install dependency server
+
 ```bash
 apt update -y
-apt install -y git curl ca-certificates gnupg lsb-release
+apt install -y git curl ca-certificates gnupg lsb-release mysql-server
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt install -y nodejs
+npm install -g pm2
 ```
 
-### 3) Install Docker + Docker Compose plugin
-```bash
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-apt update -y
-apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-systemctl enable docker
-systemctl start docker
-```
+### 2) Clone project
 
-### 4) Clone project ke path standar aaPanel
 ```bash
 mkdir -p /www/wwwroot
 cd /www/wwwroot
@@ -64,167 +64,207 @@ git clone https://github.com/lexazor/donpay.git
 cd donpay
 ```
 
-### 5) Buat file environment
+### 3) Buat env file
+
 ```bash
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
-### 6) Isi file env dengan contoh yang benar
+Tips: semua nilai rahasia di `.env` wajib diganti (jangan pakai contoh default untuk production).
 
-Edit backend env:
+### 4) Isi env backend (wajib)
+
+Edit:
+
 ```bash
 nano /www/wwwroot/donpay/backend/.env
 ```
 
-Contoh isi `backend/.env` (jika pakai MySQL dari docker compose):
+Contoh aman:
+
 ```env
 PORT=3001
-DATABASE_URL="mysql://root:GANTI_PASSWORD_MYSQL@mysql:3306/donpay"
-JWT_SECRET="GANTI_DENGAN_SECRET_ACCESS_MIN_32_CHAR"
-JWT_REFRESH_SECRET="GANTI_DENGAN_SECRET_REFRESH_MIN_32_CHAR"
+DATABASE_URL="mysql://donpay:GantiPasswordKuat!@localhost:3306/donpay"
+JWT_SECRET="ISI_SECRET_ACCESS_MIN_32_CHAR"
+JWT_REFRESH_SECRET="ISI_SECRET_REFRESH_MIN_32_CHAR"
 ```
 
-Edit frontend env:
+### 5) Isi env frontend (wajib)
+
+Edit:
+
 ```bash
 nano /www/wwwroot/donpay/frontend/.env
 ```
 
-Contoh isi `frontend/.env`:
+Contoh:
+
 ```env
 NEXT_PUBLIC_API_URL="https://api.domainkamu.com"
 ```
 
-Catatan:
-- `frontend/.env` memang harus kamu buat dulu (dari `.env.example`), tidak otomatis ada dari git.
-- Frontend tidak butuh `JWT_SECRET`.
-- `JWT_SECRET` dan `JWT_REFRESH_SECRET` hanya untuk backend, dan harus berbeda.
+Kalau belum pakai domain/SSL, sementara bisa isi:
 
-### 7) Ubah nilai penting di `docker-compose.yml`
+```env
+NEXT_PUBLIC_API_URL="http://SERVER_IP:3001"
+```
 
-Edit file:
+### 6) Buat database dan user MySQL
+
 ```bash
-nano /www/wwwroot/donpay/docker-compose.yml
+mysql -uroot
 ```
 
-Yang wajib diubah:
+Lalu jalankan di prompt MySQL:
 
-1) Bagian service `mysql`:
-```yml
-mysql:
-  environment:
-    MYSQL_ROOT_PASSWORD: GANTI_PASSWORD_MYSQL
-    MYSQL_DATABASE: donpay
+```sql
+CREATE DATABASE donpay;
+CREATE USER 'donpay'@'localhost' IDENTIFIED BY 'GantiPasswordKuat!';
+GRANT ALL PRIVILEGES ON donpay.* TO 'donpay'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
 ```
 
-2) Bagian service `backend`:
-```yml
-backend:
-  environment:
-    DATABASE_URL: mysql://root:GANTI_PASSWORD_MYSQL@mysql:3306/donpay
-    JWT_SECRET: GANTI_SECRET_ACCESS
-    JWT_REFRESH_SECRET: GANTI_SECRET_REFRESH
-```
+### 7) Install dependency + build
 
-3) Bagian service `frontend`:
-```yml
-frontend:
-  environment:
-    NEXT_PUBLIC_API_URL: https://api.domainkamu.com
-```
-
-Penting:
-- Password di `MYSQL_ROOT_PASSWORD` harus sama dengan password pada `DATABASE_URL`.
-- Jika kamu sudah isi `frontend/.env`, nilai `NEXT_PUBLIC_API_URL` di compose sebaiknya disamakan.
-- Untuk production, jangan pakai nilai default seperti `change-this-secret`.
-
-### 8) Build dan jalankan
 ```bash
-docker compose up -d --build
+cd /www/wwwroot/donpay
+npm --prefix backend install
+npm --prefix frontend install
+npm --prefix backend run prisma:generate
+npm --prefix backend run build
+npm --prefix frontend run build
 ```
 
-### 9) Migrasi database
+### 8) Migrasi database
+
 ```bash
-docker compose exec -T backend npm run prisma:migrate
-docker compose exec -T backend npm run prisma:generate
+cd /www/wwwroot/donpay
+npm --prefix backend run prisma:migrate
 ```
 
-### 10) Verifikasi
+### 9) Jalankan dengan PM2
+
 ```bash
-docker compose ps
-docker compose logs -f --tail=100
+cd /www/wwwroot/donpay
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 startup
 ```
 
-## Konfigurasi aaPanel (Reverse Proxy + SSL)
+Jalankan perintah yang ditampilkan oleh `pm2 startup` (biasanya diminta copy 1 command tambahan).
+
+## Reverse Proxy di aaPanel
 - Domain frontend -> `127.0.0.1:3000`
 - Domain backend -> `127.0.0.1:3001`
-- Aktifkan SSL Let’s Encrypt untuk keduanya
+- Aktifkan SSL Let’s Encrypt di dua domain
 
-## Panduan Update via Terminal
+Contoh mapping umum:
+- `app.domainkamu.com` -> `127.0.0.1:3000`
+- `api.domainkamu.com` -> `127.0.0.1:3001`
 
-### Update semua service
+## Command Harian PM2
+
+```bash
+pm2 list
+pm2 logs
+pm2 logs donpay-backend
+pm2 logs donpay-frontend
+pm2 restart donpay-backend
+pm2 restart donpay-frontend
+pm2 restart all
+```
+
+## Update Aplikasi di Terminal
+
+### Update semua (backend + frontend)
+
 ```bash
 cd /www/wwwroot/donpay
 git fetch origin
 git checkout main
 git pull origin main
-docker compose up -d --build
-docker compose exec -T backend npm run prisma:migrate
-docker compose exec -T backend npm run prisma:generate
+npm --prefix backend install
+npm --prefix frontend install
+npm --prefix backend run prisma:generate
+npm --prefix backend run build
+npm --prefix frontend run build
+npm --prefix backend run prisma:migrate
+pm2 restart all
+pm2 save
 ```
 
 ### Update backend saja
+
 ```bash
 cd /www/wwwroot/donpay
 git pull origin main
-docker compose build backend
-docker compose up -d backend
-docker compose exec -T backend npm run prisma:migrate
-docker compose exec -T backend npm run prisma:generate
+npm --prefix backend install
+npm --prefix backend run prisma:generate
+npm --prefix backend run build
+npm --prefix backend run prisma:migrate
+pm2 restart donpay-backend
 ```
 
 ### Update frontend saja
+
 ```bash
 cd /www/wwwroot/donpay
 git pull origin main
-docker compose build frontend
-docker compose up -d frontend
+npm --prefix frontend install
+npm --prefix frontend run build
+pm2 restart donpay-frontend
 ```
 
-### Cek status/log setelah update
-```bash
-docker compose ps
-docker compose logs -f --tail=100 backend
-docker compose logs -f --tail=100 frontend
-```
+## Rollback Cepat
 
-### Rollback cepat
 ```bash
 cd /www/wwwroot/donpay
 git log --oneline -n 10
 git checkout <commit_stabil>
-docker compose up -d --build
+npm --prefix backend install
+npm --prefix frontend install
+npm --prefix backend run build
+npm --prefix frontend run build
+pm2 restart all
 ```
 
-## Backup Database Sebelum Update Besar
-```bash
-cd /www/wwwroot/donpay
-docker compose exec -T mysql mysqldump -uroot -pROOT_PASSWORD donpay > backup-$(date +%F-%H%M).sql
-```
+> Catatan: setelah `git checkout <commit_stabil>`, branch akan masuk mode detached HEAD. Jika sudah stabil, bisa buat branch baru atau checkout lagi ke `main` saat ingin update normal.
 
-## Operasional Harian
+## Backup Database
+
 ```bash
-cd /www/wwwroot/donpay
-docker compose restart
-docker compose down
-docker compose up -d
-docker compose logs -f backend
-docker compose logs -f frontend
+mysqldump -udonpay -p donpay > /root/backup-donpay-$(date +%F-%H%M).sql
 ```
 
 ## Checklist Production
-- Ganti semua secret default
-- Batasi akses MySQL hanya internal/private network
-- Aktifkan backup otomatis harian
-- Aktifkan monitoring resource + alert
-- Gunakan domain + HTTPS penuh
+- Gunakan secret JWT kuat dan berbeda
+- Gunakan password DB kuat
+- Matikan login root MySQL remote
+- Pasang firewall (buka 80/443 saja untuk publik)
+- Aktifkan backup terjadwal database
+
+## Troubleshooting Singkat
+
+### PM2 app tidak jalan
+```bash
+pm2 logs donpay-backend --lines 100
+pm2 logs donpay-frontend --lines 100
+```
+
+### Build frontend gagal
+```bash
+cd /www/wwwroot/donpay
+npm --prefix frontend install
+npm --prefix frontend run build
+```
+
+### Backend gagal konek MySQL
+- Cek `DATABASE_URL` di `backend/.env`
+- Pastikan user DB dan password sama persis dengan MySQL
+- Coba login manual:
+
+```bash
+mysql -udonpay -p
+```

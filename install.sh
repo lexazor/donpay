@@ -5,6 +5,11 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/www/wwwroot/donpay}"
 REPO_URL="${REPO_URL:-https://github.com/lexazor/donpay.git}"
 BRANCH="${BRANCH:-main}"
+DB_NAME="${DB_NAME:-donpay}"
+DB_USER="${DB_USER:-donpay}"
+DB_PASSWORD="${DB_PASSWORD:-ChangeThisDbPassword123!}"
+BACKEND_PORT="${BACKEND_PORT:-3001}"
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
 print_step() {
   echo ""
@@ -18,27 +23,17 @@ require_root() {
   fi
 }
 
-install_docker() {
-  if command -v docker >/dev/null 2>&1 && command -v docker compose >/dev/null 2>&1; then
-    print_step "Docker + Docker Compose sudah terpasang"
-    return
+install_base_packages() {
+  print_step "Install paket dasar"
+  apt-get update -y
+  apt-get install -y git curl ca-certificates gnupg lsb-release mysql-server
+
+  if ! command -v node >/dev/null 2>&1; then
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    apt-get install -y nodejs
   fi
 
-  print_step "Menginstall Docker dan plugin Compose"
-  apt-get update -y
-  apt-get install -y ca-certificates curl gnupg lsb-release git
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
-
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list >/dev/null
-
-  apt-get update -y
-  apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  systemctl enable docker
-  systemctl start docker
+  npm install -g pm2
 }
 
 clone_or_update_repo() {
@@ -65,39 +60,68 @@ prepare_env() {
     cp "$APP_DIR/frontend/.env.example" "$APP_DIR/frontend/.env"
   fi
 
-  if grep -q "change-this-secret" "$APP_DIR/docker-compose.yml"; then
-    echo ""
-    echo "PERHATIAN: ubah secret JWT pada docker-compose.yml sebelum production publik."
+  if ! grep -q '^JWT_REFRESH_SECRET=' "$APP_DIR/backend/.env"; then
+    echo 'JWT_REFRESH_SECRET="replace-with-strong-refresh-secret"' >> "$APP_DIR/backend/.env"
   fi
 }
 
-start_services() {
-  print_step "Build dan jalankan semua service"
-  docker compose -f "$APP_DIR/docker-compose.yml" up -d --build
+setup_mysql() {
+  print_step "Konfigurasi MySQL lokal"
+  systemctl enable mysql
+  systemctl start mysql
 
-  print_step "Jalankan migrasi Prisma"
-  docker compose -f "$APP_DIR/docker-compose.yml" exec -T backend npm run prisma:migrate || true
-  docker compose -f "$APP_DIR/docker-compose.yml" exec -T backend npm run prisma:generate
+  mysql -uroot <<SQL
+CREATE DATABASE IF NOT EXISTS \\`$DB_NAME\\`;
+CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASSWORD';
+ALTER USER '$DB_USER'@'localhost' IDENTIFIED BY '$DB_PASSWORD';
+GRANT ALL PRIVILEGES ON \\`$DB_NAME\\`.* TO '$DB_USER'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+
+  sed -i "s|^DATABASE_URL=.*|DATABASE_URL=\"mysql://$DB_USER:$DB_PASSWORD@localhost:3306/$DB_NAME\"|" "$APP_DIR/backend/.env"
+}
+
+build_apps() {
+  print_step "Install dependency backend/frontend"
+  npm --prefix "$APP_DIR/backend" install
+  npm --prefix "$APP_DIR/frontend" install
+
+  print_step "Build production"
+  npm --prefix "$APP_DIR/backend" run prisma:generate
+  npm --prefix "$APP_DIR/backend" run build
+  npm --prefix "$APP_DIR/frontend" run build
+
+  print_step "Migrasi Prisma"
+  npm --prefix "$APP_DIR/backend" run prisma:migrate || true
+}
+
+start_pm2() {
+  print_step "Menjalankan aplikasi via PM2"
+  pm2 delete donpay-backend donpay-frontend >/dev/null 2>&1 || true
+  FRONTEND_PORT="$FRONTEND_PORT" BACKEND_PORT="$BACKEND_PORT" pm2 start "$APP_DIR/ecosystem.config.cjs"
+  pm2 save
 }
 
 final_output() {
   print_step "Instalasi selesai"
-  echo "Frontend: http://SERVER_IP:3000"
-  echo "Backend:  http://SERVER_IP:3001"
+  echo "Frontend: http://SERVER_IP:$FRONTEND_PORT"
+  echo "Backend:  http://SERVER_IP:$BACKEND_PORT"
   echo ""
-  echo "Cek status container:"
-  echo "docker compose -f $APP_DIR/docker-compose.yml ps"
+  echo "Cek status PM2:"
+  echo "pm2 list"
   echo ""
   echo "Cek log realtime:"
-  echo "docker compose -f $APP_DIR/docker-compose.yml logs -f"
+  echo "pm2 logs"
 }
 
 main() {
   require_root
-  install_docker
+  install_base_packages
   clone_or_update_repo
   prepare_env
-  start_services
+  setup_mysql
+  build_apps
+  start_pm2
   final_output
 }
 
