@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/var/www/donpay}"
+APP_DIR="${APP_DIR:-/www/wwwroot/donpay}"
 REPO_URL="${REPO_URL:-https://github.com/lexazor/donpay.git}"
 BRANCH="${BRANCH:-main}"
 
