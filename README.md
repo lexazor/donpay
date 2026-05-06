@@ -5,6 +5,10 @@ Deploy DonPay (Next.js + NestJS + MySQL + Prisma) ke VPS/aaPanel dengan cepat, a
 ## Ringkasan
 - Repo: `https://github.com/lexazor/donpay.git`
 - Path standar server: `/www/wwwroot/donpay`
+- Lokasi file penting:
+  - Backend env: `/www/wwwroot/donpay/backend/.env`
+  - Frontend env: `/www/wwwroot/donpay/frontend/.env`
+  - Docker Compose: `/www/wwwroot/donpay/docker-compose.yml`
 - Service default:
   - Frontend: `3000`
   - Backend API: `3001`
@@ -66,29 +70,86 @@ cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
-### 6) Ubah nilai penting production
-- `backend/.env`
-  - `JWT_SECRET`
-  - `JWT_REFRESH_SECRET`
-  - `DATABASE_URL` (jika tidak pakai DB container lokal)
-- `frontend/.env`
-  - `NEXT_PUBLIC_API_URL` (domain API production)
-- `docker-compose.yml`
-  - password MySQL
-  - secret default
+### 6) Isi file env dengan contoh yang benar
 
-### 7) Build dan jalankan
+Edit backend env:
+```bash
+nano /www/wwwroot/donpay/backend/.env
+```
+
+Contoh isi `backend/.env` (jika pakai MySQL dari docker compose):
+```env
+PORT=3001
+DATABASE_URL="mysql://root:GANTI_PASSWORD_MYSQL@mysql:3306/donpay"
+JWT_SECRET="GANTI_DENGAN_SECRET_ACCESS_MIN_32_CHAR"
+JWT_REFRESH_SECRET="GANTI_DENGAN_SECRET_REFRESH_MIN_32_CHAR"
+```
+
+Edit frontend env:
+```bash
+nano /www/wwwroot/donpay/frontend/.env
+```
+
+Contoh isi `frontend/.env`:
+```env
+NEXT_PUBLIC_API_URL="https://api.domainkamu.com"
+```
+
+Catatan:
+- `frontend/.env` memang harus kamu buat dulu (dari `.env.example`), tidak otomatis ada dari git.
+- Frontend tidak butuh `JWT_SECRET`.
+- `JWT_SECRET` dan `JWT_REFRESH_SECRET` hanya untuk backend, dan harus berbeda.
+
+### 7) Ubah nilai penting di `docker-compose.yml`
+
+Edit file:
+```bash
+nano /www/wwwroot/donpay/docker-compose.yml
+```
+
+Yang wajib diubah:
+
+1) Bagian service `mysql`:
+```yml
+mysql:
+  environment:
+    MYSQL_ROOT_PASSWORD: GANTI_PASSWORD_MYSQL
+    MYSQL_DATABASE: donpay
+```
+
+2) Bagian service `backend`:
+```yml
+backend:
+  environment:
+    DATABASE_URL: mysql://root:GANTI_PASSWORD_MYSQL@mysql:3306/donpay
+    JWT_SECRET: GANTI_SECRET_ACCESS
+    JWT_REFRESH_SECRET: GANTI_SECRET_REFRESH
+```
+
+3) Bagian service `frontend`:
+```yml
+frontend:
+  environment:
+    NEXT_PUBLIC_API_URL: https://api.domainkamu.com
+```
+
+Penting:
+- Password di `MYSQL_ROOT_PASSWORD` harus sama dengan password pada `DATABASE_URL`.
+- Jika kamu sudah isi `frontend/.env`, nilai `NEXT_PUBLIC_API_URL` di compose sebaiknya disamakan.
+- Untuk production, jangan pakai nilai default seperti `change-this-secret`.
+
+### 8) Build dan jalankan
 ```bash
 docker compose up -d --build
 ```
 
-### 8) Migrasi database
+### 9) Migrasi database
 ```bash
 docker compose exec -T backend npm run prisma:migrate
 docker compose exec -T backend npm run prisma:generate
 ```
 
-### 9) Verifikasi
+### 10) Verifikasi
 ```bash
 docker compose ps
 docker compose logs -f --tail=100
